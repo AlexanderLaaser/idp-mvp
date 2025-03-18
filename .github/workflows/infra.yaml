@@ -1,0 +1,53 @@
+name: Deploy AWS Infra
+
+permissions:
+  issues: write
+  id-token: write
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-infra:
+    name: Deploy Infra Stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_NAME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install dependencies in aws folder
+        run: npm install
+        working-directory: ./aws
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+        working-directory: ./aws
+
+      - name: Build CDK in aws folder
+        run: npm run build
+        working-directory: ./aws
+
+      - name: Synthesize CloudFormation Template
+        run: npx cdk synth --no-staging > template.yaml
+        working-directory: ./aws
+
+      - name: Scan CloudFormation template with Checkov
+        uses: bridgecrewio/checkov-action@v12.2963.0
+        with:
+          directory: ./aws
+          output_format: cli
+          soft_fail: true
+
+      - name: Deploy Infra Stack
+        run: npx cdk deploy Eks --require-approval never
+        working-directory: ./aws
